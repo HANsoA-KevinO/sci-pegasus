@@ -1,0 +1,68 @@
+# =============================================================================
+# Sci-Pegasus self-hosted stack.
+#
+# Isolation contract:
+#   - Compose project / image / network / volumes use the sci-pegasus namespace.
+#   - The Next.js application listens on host and container port 3100.
+#   - MongoDB uses its normal container port 27017 and is exposed only on the
+#     host loopback interface at 27018 for local administration.
+#   - Application data lives in the dedicated `sci_pegasus` database.
+#
+# Copy `.env.production.example` to `.env.production` and fill every secret
+# before starting the stack. Never reuse Pegasus secrets, API keys, buckets,
+# networks, or volumes.
+# =============================================================================
+
+name: sci-pegasus
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sci-pegasus:latest
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    env_file:
+      - .env.production
+    environment:
+      PORT: "3100"
+      # Pin the bundled Mongo service and database even if a copied env file
+      # still contains an old URI. External Mongo deployments should replace
+      # this value deliberately instead of inheriting Pegasus configuration.
+      MONGODB_URI: mongodb://mongo:27017/sci_pegasus
+      AGENT_RUNTIME_INTERNAL_BASE_URL: http://127.0.0.1:3100
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - sci-pegasus-net
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - sci-pegasus-mongo-data:/data/db
+      - sci-pegasus-mongo-config:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - sci-pegasus-net
+
+networks:
+  sci-pegasus-net:
+    name: sci-pegasus-net
+    driver: bridge
+
+volumes:
+  sci-pegasus-mongo-data:
+    name: sci-pegasus-mongo-data
+  sci-pegasus-mongo-config:
+    name: sci-pegasus-mongo-config
